@@ -19,8 +19,9 @@
  * Otimizações aplicadas:
  *  - Rotação in-place: elimina a necessidade de matriz auxiliar.
  *  - Distribuição intercalada de linhas para balanceamento de carga.
- *  - Variáveis com 'register' para acesso rápido.
+ *  - Variáveis de muito acesso armazenadas em registradores para acesso rápido.
  *  - Alocação dinâmica em única etapa (malloc contíguo).
+ *  - Trabalhar sempre no maximo com blocos de 16 
  *
  * Compilação:
  *   make   (use o Makefile fornecido)
@@ -42,21 +43,33 @@
 #include <string.h>
 #include <unistd.h>
 
+
+/** Tamanho do bloco de cache tile (linhas e colunas) -> Ser . */
+#define TILE 16
+
+/* =========================================================
+ * Estruturas
+ * ========================================================= */
+
 /**
  * Argumentos passados a cada thread de rotação.
  * Contém todos os dados necessários para os dois passos
  * (transposta e espelhamento) sem variáveis globais.
  */
 typedef struct {
-    int               id;              /**< Identificador da thread (0-based).         */
-    int               N;               /**< Dimensão da matriz (N x N).                */
-    int               T;               /**< Total de threads.                          */
-    int             **mat;             /**< Matriz a ser rotacionada in-place.         */
+    int               id;        /**< Identificador da thread (0-based).        */
+    int               N;         /**< Dimensão da matriz (N x N).               */
+    int               T;         /**< Total de threads.                          */
+    int             **mat;       /**< Matriz a ser rotacionada in-place.         */
     pthread_barrier_t *barreira;       /**< Barreira entre transposta e espelhamento.  */
     double            tempo;           /**< Tempo total da thread.                     */
     double            tempoTransposta; /**< Tempo gasto apenas na transposta.          */
     double            tempoEspelho;    /**< Tempo gasto apenas no espelhamento.        */
 } ArgThread;
+
+/* =========================================================
+ * Funções auxiliares: alocação de matriz
+ * ========================================================= */
 
 /**
  * Aloca uma matriz N x N de inteiros em um único bloco contíguo
@@ -103,6 +116,10 @@ static void liberaMatriz(int **mat)
     free(mat[0]); /* libera o bloco contíguo de dados */
     free(mat);    /* libera o vetor de ponteiros       */
 }
+
+/* =========================================================
+ * Funções auxiliares: E/S de arquivo
+ * ========================================================= */
 
 /**
  * Lê a matriz N x N do arquivo de entrada (formato texto, linha a linha).
@@ -167,10 +184,11 @@ static int gravaMatriz(const char *nomeArq, int **mat, int N)
     return 0;
 }
 
-/**
+/* =========================================================
  * Passo 1: Transposta do triângulo superior com tiling
- * 
- *
+ * ========================================================= */
+
+/**
  * Realiza a transposta in-place das linhas intercaladas atribuídas
  * a esta thread, processando apenas o triângulo superior (j > i)
  * para evitar que duas threads troquem o mesmo par de elementos.
@@ -181,6 +199,8 @@ static int gravaMatriz(const char *nomeArq, int **mat, int N)
  *   garantindo que cada par (i,j) seja tocado por exatamente
  *   uma thread, sem necessidade de mutex.
  *
+ * Tiling TILE x TILE garante que os blocos de leitura/escrita
+ * caibam inteiramente em cache L1 antes de avançar.
  *
  * @param mat  Matriz a ser transposta in-place.
  * @param N    Dimensão da matriz.
@@ -189,22 +209,31 @@ static int gravaMatriz(const char *nomeArq, int **mat, int N)
  */
 static void transpostaBloco(int **mat, int N, int id, int T)
 {
-    register int i, j; /* iteradores de linha e coluna      */
-    register int tmp;  /* variável temporária para a troca  */
+    register int i,  j;   /* iteradores de linha e coluna      */
+    register int jMax;    /* limite do bloco de colunas        */
+    register int tmp;     /* variável temporária para a troca  */
 
     for (i = id; i < N; i += T) {
-        for (j = i + 1; j < N; j++) {
-            tmp       = mat[i][j];
-            mat[i][j] = mat[j][i];
-            mat[j][i] = tmp;
+        for (jMax = i + 1; jMax < N; jMax += TILE) {
+            register int jFim = jMax + TILE;
+            if (jFim > N) jFim = N;
+
+            for (j = jMax; j < jFim; j++) {
+                tmp       = mat[i][j];
+                mat[i][j] = mat[j][i];
+                mat[j][i] = tmp;
+            }
         }
     }
+
+    /* Suprime warnings de variáveis não usadas nesta versão simplificada */
 }
 
-/**
+/* =========================================================
  * Passo 2: Espelhamento horizontal de linhas
- * 
- *
+ * ========================================================= */
+
+/**
  * Espelha horizontalmente as linhas atribuídas a esta thread.
  * Cada linha i tem seus elementos trocados: mat[i][j] ↔ mat[i][N-1-j],
  * percorrendo apenas a metade esquerda (j < N/2).
@@ -234,12 +263,15 @@ static void espelhaLinhas(int **mat, int N, int id, int T)
     }
 }
 
+/* =========================================================
+ * Função executada por cada thread de rotação
+ * ========================================================= */
 
 /**
  * Ponto de entrada de cada thread de processamento.
  *
  * Executa os dois passos da rotação in-place:
- *   1. Transposta do triângulo superior (intercalação).
+ *   1. Transposta do triângulo superior (com tiling e intercalação).
  *   2. Barreira: aguarda todas as threads concluírem a transposta.
  *   3. Espelhamento horizontal das linhas atribuídas.
  *
@@ -254,7 +286,7 @@ static void *threadRotaciona(void *arg)
 
     struct timespec inicio, fimTransposta, fimEspelho;
 
-    /* Passo 1: Transposta do triângulo superior */
+    /* Passo 1: Transposta do triângulo superior com tiling */
     clock_gettime(CLOCK_MONOTONIC, &inicio);
     transpostaBloco(dados->mat, dados->N, dados->id, dados->T);
     clock_gettime(CLOCK_MONOTONIC, &fimTransposta);
@@ -267,16 +299,21 @@ static void *threadRotaciona(void *arg)
     espelhaLinhas(dados->mat, dados->N, dados->id, dados->T);
     clock_gettime(CLOCK_MONOTONIC, &fimEspelho);
 
-    dados->tempoTransposta = (double)(fimTransposta.tv_sec  - inicio.tv_sec) + (double)(fimTransposta.tv_nsec - inicio.tv_nsec) / 1.0e9;
-    dados->tempoEspelho    = (double)(fimEspelho.tv_sec  - fimTransposta.tv_sec) + (double)(fimEspelho.tv_nsec - fimTransposta.tv_nsec) / 1.0e9;
-    dados->tempo           = (double)(fimEspelho.tv_sec  - inicio.tv_sec) + (double)(fimEspelho.tv_nsec - inicio.tv_nsec) / 1.0e9;
+    dados->tempoTransposta = (double)(fimTransposta.tv_sec  - inicio.tv_sec)
+                           + (double)(fimTransposta.tv_nsec - inicio.tv_nsec) / 1.0e9;
+
+    dados->tempoEspelho    = (double)(fimEspelho.tv_sec  - fimTransposta.tv_sec)
+                           + (double)(fimEspelho.tv_nsec - fimTransposta.tv_nsec) / 1.0e9;
+
+    dados->tempo           = (double)(fimEspelho.tv_sec  - inicio.tv_sec)
+                           + (double)(fimEspelho.tv_nsec - inicio.tv_nsec) / 1.0e9;
 
     return NULL;
 }
 
-/* 
+/* =========================================================
  * Função de distribuição de trabalho entre threads
- */
+ * ========================================================= */
 
 /**
  * Inicializa a barreira, cria T threads de processamento,
@@ -365,9 +402,9 @@ static int executaThreads(int **mat, int N, int T)
     return 0;
 }
 
-/*
+/* =========================================================
  * Validação de argumentos
- */
+ * ========================================================= */
 
 /**
  * Valida e converte os argumentos da linha de comando.
@@ -430,6 +467,10 @@ static int validaArgs(int argc, char *argv[],
     *outSaida   = argv[4];
     return 0;
 }
+
+/* =========================================================
+ * main
+ * ========================================================= */
 
 int main(int argc, char *argv[])
 {
