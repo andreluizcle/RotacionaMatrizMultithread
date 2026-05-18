@@ -19,7 +19,7 @@
  * Otimizações aplicadas:
  *  - Rotação in-place: elimina a necessidade de matriz auxiliar.
  *  - Distribuição intercalada de linhas para balanceamento de carga.
- *  - Variáveis com 'register' para acesso rápido.
+ *  - Variáveis nos registradores para acesso rápido.
  *  - Alocação dinâmica em única etapa (malloc contíguo).
  *
  * Compilação:
@@ -168,7 +168,7 @@ static int gravaMatriz(const char *nomeArq, int **mat, int N)
 }
 
 /**
- * Passo 1: Transposta do triângulo superior com tiling
+ * Passo 1: Transposta do triângulo superior
  * 
  *
  * Realiza a transposta in-place das linhas intercaladas atribuídas
@@ -381,9 +381,7 @@ static int executaThreads(int **mat, int N, int T)
  * @param outSaida   Saída: nome do arquivo de saída.
  * @return           0 em sucesso, 1 em erro.
  */
-static int validaArgs(int argc, char *argv[],
-                      int *outN, int *outT,
-                      const char **outEntrada, const char **outSaida)
+static int validaArgs(int argc, char *argv[], int *outN, int *outT, const char **outEntrada, const char **outSaida)
 {
     if (argc != 5) {
         fprintf(stderr,
@@ -464,7 +462,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    /* 5. Grava a matriz rotacionada no arquivo de saída (I/O não é contado) */
+    /* 5. Grava a matriz rotacionada no arquivo de saída */
     if (gravaMatriz(arqSaida, mat, N) != 0) {
         liberaMatriz(mat);
         return 1;
