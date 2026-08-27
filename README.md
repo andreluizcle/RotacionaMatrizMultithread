@@ -1,6 +1,6 @@
 # RotacionaMatAntigo
 
-Projeto de estudos em **C** sobre programação com **POSIX Threads (pthreads)**, feito durante o estudo de multithreading / Sistemas Operacionais (baseado nos comentários do código, é um projeto prático da disciplina **TT304 - Sistemas Operacionais**).
+Projeto de estudos em **C** sobre programação com **POSIX Threads (pthreads)**, feito durante o estudo de multithreading / Sistemas Operacionais.
 
 O programa rotaciona uma matriz `N x N` em **90° no sentido horário**, dividindo o trabalho entre várias threads e comparando o tempo de execução com diferentes quantidades delas (1, 2, 4, 8...).
 
@@ -90,5 +90,4 @@ Um arquivo texto simples: cada linha representa uma linha da matriz, com os valo
 
 ## Observações
 
-- Este é um projeto de estudo/prático (o nome "Antigo" sugere que é uma versão anterior de outro projeto do autor), então o foco está mais em explorar conceitos de threads (divisão de trabalho, sincronização com barreira, medição de tempo) do que em ser uma ferramenta de uso geral.
 - O tempo de leitura e escrita dos arquivos **não** entra na medição — só o tempo da rotação em si é cronometrado, para isolar o efeito da paralelização.
